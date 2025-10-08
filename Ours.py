@@ -11,15 +11,15 @@ import matplotlib.pyplot as plt
 # -------------------------
 iter_max = 200
 tol = 0.1          # convergence tolerance for |M_old - M_new|
-M_guess = 1000     # initial guess for total mass (kg)
+M_guess = 200     # initial guess for total mass (kg)
 M_old = M_guess
-payload = 400      # kg
+payload = 15      # kg
 
 # -------------------------
 # Global parameters (from paper)
 # -------------------------
 g = 9.81                     # m/s²
-rho = 1.225                  # kg/m³
+rho = 0.777                 # kg/m³
 FM = 0.75                    # Figure of merit
 eta_prop = 0.85              # Propulsion system efficiency
 SoC_min = 0.20               # Minimum state of charge
@@ -30,24 +30,23 @@ N_prop = 4
 PM = 0.50                    # Power margin (50%)
 cD_PL = 0.04353
 cL_PL = 1.5
-AR = 7.0
+AR = 6.0
 e_oswald = 0.85
 
 # -------------------------
 # Geometry / Mission setup
 # -------------------------
-V_cr = 66.67                 # m/s (240 km/h)
+V_cr = 20.0                  # m/s
 V_v = 2.5                    # m/s (climb rate)
-disk_area_per_rotor = 7.0    # m² per rotor (based on DL ≈ 700 N/m²)
+disk_area_per_rotor = 0.5
 N_rotors = 4
 A_total = disk_area_per_rotor * N_rotors
 
-b = 7.0                      # m (wing span)
+b = 2.0                     # m (wing span)
 S_ref = b**2 / AR            # m²
-#range_m = 100000             # m (100 km)
-range_m = 37000               # m (37 km)
+range_m = 20000               # m
 hover_ht = 1.5               # m
-climb_ht = 300               # m
+climb_ht = 1000               # m
 
 # -------------------------
 # Data storage
@@ -59,22 +58,30 @@ pow_hv, pow_cb, pow_cr = [], [], []
 # Component mass models
 # (All from Roskam/Torenbeek class II methods)
 # -------------------------
-def m_fuselage(total_mass, l_f=5.0, P_max=4.71, Npax=4):
-    total_mass = total_mass * 2.2046
-    return (14.86 * (total_mass**0.146) * ((l_f / P_max)**0.778)
-            * (l_f**0.383) * (Npax**0.455)) * 0.4535
+def m_fuselage(total_mass, l_f=2.0, P_max=1.75, Npax=0.25):
+    """Fuselage mass (Raymer/Roskam-type)"""
+    # Convert inputs: kg→lbm, m→ft
+    total_mass_lb = total_mass * 2.2046
+    l_f_ft = l_f * 3.28084
+    P_max_ft = P_max * 3.28084
+
+    W_fus_lb = (14.86 * (total_mass_lb ** 0.144) *
+                ((l_f_ft / P_max_ft) ** 0.778) *
+                (l_f_ft ** 0.383) * (Npax ** 0.455))
+
+    return W_fus_lb * 0.4535   # lbm→kg
 
 def m_wing(total_mass, S=S_ref, eta_w=5, AR=AR):
     total_mass = total_mass * 2.2046
     return (0.04674 * (total_mass**0.397) * ((S * 3.2808)**0.360)
             * (eta_w**0.397) * (AR**1.712)) * 0.4535
 
-def m_tail_h(total_mass, S_th=3.6, AR_th=3.26, trh=0.246):
+def m_tail_h(total_mass, S_th=S_ref*0.3, AR_th=3.26, trh=0.246):
     total_mass = total_mass * 2.2046
     return ((3.184 * (total_mass**0.887) * (S_th**0.101) * (AR_th**0.101))
             / (174.04 * (trh**0.223))) * 0.4535
 
-def m_tail_v(total_mass, S_tv=1.377, AR_tv=3.75, trv=0.082, Lambda=0):
+def m_tail_v(total_mass, S_tv=S_ref*0.2, AR_tv=3.75, trv=0.082, Lambda=0):
     total_mass = total_mass * 2.2046
     return ((1.68 * (total_mass**0.567) * (S_tv**1.249) * (AR_tv**0.482))
             / (639.95 * (trv**0.747) * (np.cos(Lambda)**0.882))) * 0.4535
@@ -87,8 +94,14 @@ def m_motor(P_cb):
     return 0.165 * (P_cb * 1e-3) * (1 + PM)  # mass of all motors (kg)
 
 def m_prop(P_cb, d_prop=3.28, Nprop=N_prop, N_bl=3):
-    return (0.144 * ((d_prop * (P_cb * 0.00134) / max(1, Nprop)
-                     * (N_bl**0.5))**0.782)) * 0.4535
+    """Propeller mass"""
+    # Convert diameter from m → ft for correlation
+    d_prop_ft = d_prop * 3.28084
+    W_prop_lb = (0.144 * ((d_prop_ft *
+                           (P_cb * 0.00134) /
+                           max(1, Nprop) *
+                           (N_bl ** 0.5)) ** 0.782))
+    return W_prop_lb * 0.4535
 
 # -------------------------
 # Power models
@@ -137,6 +150,7 @@ for i in range(1, iter_max + 1):
 
     # Battery mass (kg)
     m_batt = E_total * (1.0 + SoC_min) / (SED * eta_b * 3600)
+
     Mbatt.append(m_batt)
 
     # Structural and propulsion masses
@@ -180,6 +194,11 @@ print(f"  Horizontal Tail Mass: {Mht[-1]:.2f} kg")
 print(f"  Vertical Tail Mass: {Mvt[-1]:.2f} kg")
 print(f"  Landing Gear Mass: {Mlg[-1]:.2f} kg")
 print(f"  Total Airframe Mass: {m_airframe:.2f} kg")
+
+print(f"  Propulsion Mass: {m_propulsion:.2f} kg")
+print(f"  Battery Mass: {Mbatt[-1]:.2f} kg")
+print(f"  Payload Mass: {payload:.2f} kg")
+print(f"  Final Takeoff Mass: {M_new:.2f} kg\n")
 
 # # -------------------------
 # # Plots
